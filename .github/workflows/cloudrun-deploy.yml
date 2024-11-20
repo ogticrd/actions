@@ -85,7 +85,7 @@ jobs:
           region: ${{ inputs.region }}
           flags: |
             --vpc-connector=projects/${{ secrets.GCP_PROJECT }}/locations/${{ secrets.GCP_REGION }}/connectors/${{ secrets.GCP_REGION }}
-          env_vars: ${github_output.parsed_vars}
+          env_vars: $${github_output.parsed_vars}
 
       - name: Allow unauthenticated calls to the service
         run: |
