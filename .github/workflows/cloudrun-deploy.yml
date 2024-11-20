@@ -73,8 +73,8 @@ jobs:
         id: parse_variables
         run: |
           echo "${{ inputs.deploy_variables }}" > variables.json
-          echo "Loaded custom variables:"
-          cat variables.json
+          parsed_vars = "$( ${{ inputs.deploy_variables }} | jq -r 'to_entries|map("\(.key)=\(.value|tostring)")|.[]')"
+          echo $parsed_vars >> github_output
 
       - name: Deploy to cloud run
         id: deploy
@@ -85,8 +85,7 @@ jobs:
           region: ${{ inputs.region }}
           flags: |
             --vpc-connector=projects/${{ secrets.GCP_PROJECT }}/locations/${{ secrets.GCP_REGION }}/connectors/${{ secrets.GCP_REGION }}
-          env_vars: |
-            $(cat variables.json | jq -r 'to_entries|map("\(.key)=\(.value|tostring)")|.[]')
+          env_vars: ${github_output}
 
       - name: Allow unauthenticated calls to the service
         run: |
