@@ -15,6 +15,9 @@ on:
       registry:
         required: true
         type: string
+      environment:
+        required: false
+        type: string
       build_variables:
         description: "Dynamic JSON object with custom build variables"
         required: false
