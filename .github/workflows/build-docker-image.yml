@@ -89,7 +89,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           push: true
           build-args: |
-            BUILD_VARIABLES=${{ secrets.BUILD_VARIABLES }}
+            BUILD_VARIABLES=${{ vars.BUILD_VARIABLES }}
 
 
           # To improve build speeds, for each branch we push an additional image to the registry,
