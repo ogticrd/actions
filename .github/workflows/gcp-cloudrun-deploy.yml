@@ -91,7 +91,8 @@ jobs:
           region: ${{ inputs.region }}
           flags: |
             --vpc-connector=projects/${{ inputs.project }}/locations/${{ inputs.region }}/connectors/${{ inputs.region }}
-          env_vars: ${{ steps.decode_env.outputs.env_vars_str }}
+          # env_vars: ${{ steps.decode_env.outputs.env_vars_str }}
+          env_vars_file: .env.prod
 
       - name: Allow unauthenticated calls to the service
         run: |
