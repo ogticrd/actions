@@ -73,6 +73,7 @@ jobs:
         id: decode_env
         shell: bash
         run: |
+          echo "Decodificando variables de entorno---: ${{ inputs.env_vars }}"
           if [ -n "${{ inputs.env_vars }}" ]; then
             decoded=$(echo "${{ inputs.env_vars }}" | base64 --decode)
             echo "$decoded" >> $GITHUB_ENV
