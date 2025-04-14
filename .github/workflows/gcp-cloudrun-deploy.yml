@@ -69,6 +69,18 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1.1.1
 
+      - name: Decodificar variables de entorno
+        id: decode_env
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.env_vars }}" ]; then
+            decoded=$(echo "${{ inputs.env_vars }}" | base64 --decode)
+            echo "$decoded" >> $GITHUB_ENV
+            echo "env_vars_str=$decoded" >> $GITHUB_OUTPUT
+          else
+            echo "No se pasaron variables de entorno."
+          fi
+
       - name: Deploy to cloud run
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2.6.0
@@ -78,7 +90,7 @@ jobs:
           region: ${{ inputs.region }}
           flags: |
             --vpc-connector=projects/${{ secrets.GCP_PROJECT }}/locations/${{ secrets.GCP_REGION }}/connectors/${{ secrets.GCP_REGION }}
-          env_vars: ${{ inputs.env_vars }}
+          env_vars: ${{ steps.decode_env.outputs.env_vars_str }}
 
       - name: Allow unauthenticated calls to the service
         run: |
