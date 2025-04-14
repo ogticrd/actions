@@ -89,7 +89,7 @@ jobs:
           service: ${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}-${{ inputs.default_name || needs.versioning.outputs.version || env.GITHUB_HEAD_REF_SLUG || env.GITHUB_REF_SLUG }}
           region: ${{ inputs.region }}
           flags: |
-            --vpc-connector=projects/${{ secrets.GCP_PROJECT }}/locations/${{ secrets.GCP_REGION }}/connectors/${{ secrets.GCP_REGION }}
+            --vpc-connector=projects/${{ inputs.project }}/locations/${{ inputs.region }}/connectors/${{ inputs.region }}
           env_vars: ${{ steps.decode_env.outputs.env_vars_str }}
 
       - name: Allow unauthenticated calls to the service
