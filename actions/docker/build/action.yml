@@ -14,7 +14,7 @@ inputs:
     description: "Registry password or token"
     required: true
   image-name:
-    description: "Image name without registry prefix (e.g., project-id/repo/app)"
+    description: "Image name (e.g., project-id/repo/app). Can include registry prefix — it will be stripped automatically"
     required: true
   dockerfile:
     description: "Path to Dockerfile"
@@ -74,6 +74,19 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Normalize image name
+      id: normalize
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+      run: |
+        # Strip registry prefix if already included in image-name
+        if [[ "$IMAGE_NAME" == "$REGISTRY"/* ]]; then
+          IMAGE_NAME="${IMAGE_NAME#$REGISTRY/}"
+        fi
+        echo "image-name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
@@ -91,7 +104,7 @@ runs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ inputs.registry }}/${{ inputs.image-name }}
+        images: ${{ inputs.registry }}/${{ steps.normalize.outputs.image-name }}
         tags: |
           type=sha,prefix=
           type=ref,event=branch
@@ -105,7 +118,7 @@ runs:
           type=raw,value=${{ inputs.environment }},enable=${{ inputs.environment != '' }}
           ${{ inputs.extra-tags }}
         labels: |
-          org.opencontainers.image.title=${{ inputs.image-name }}
+          org.opencontainers.image.title=${{ steps.normalize.outputs.image-name }}
           org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           org.opencontainers.image.revision=${{ github.sha }}
 
@@ -115,7 +128,7 @@ runs:
       env:
         CACHE_STRATEGY: ${{ inputs.cache-strategy }}
         REGISTRY: ${{ inputs.registry }}
-        IMAGE_NAME: ${{ inputs.image-name }}
+        IMAGE_NAME: ${{ steps.normalize.outputs.image-name }}
       run: |
         # Generate URL-safe branch slug for cache keys
         BRANCH_SLUG=$(echo "${GITHUB_REF_NAME}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
@@ -175,7 +188,7 @@ runs:
       shell: bash
       env:
         REGISTRY: ${{ inputs.registry }}
-        IMAGE_NAME: ${{ inputs.image-name }}
+        IMAGE_NAME: ${{ steps.normalize.outputs.image-name }}
       run: |
         SHORT_SHA="${GITHUB_SHA:0:7}"
         PRIMARY_IMAGE="${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}"
@@ -189,7 +202,7 @@ runs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| **Image** | \`${{ inputs.registry }}/${{ inputs.image-name }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Image** | \`${{ inputs.registry }}/${{ steps.normalize.outputs.image-name }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "| **Digest** | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "| **Environment** | ${{ inputs.environment || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
         echo "| **Platforms** | ${{ inputs.platforms }} |" >> $GITHUB_STEP_SUMMARY
