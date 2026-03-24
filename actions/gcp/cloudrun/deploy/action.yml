@@ -1,0 +1,152 @@
+name: "Cloud Run Deploy"
+description: "Deploy a container image to Google Cloud Run with configurable scaling and environment variables"
+author: "OGTIC"
+
+inputs:
+  image:
+    description: "Full image reference (registry/name:tag or registry/name@digest)"
+    required: true
+  service:
+    description: "Cloud Run service name"
+    required: true
+  region:
+    description: "GCP region"
+    required: true
+  project-id:
+    description: "GCP project ID (uses default from auth if empty)"
+    required: false
+    default: ""
+  env-vars:
+    description: "Runtime environment variables (multiline KEY=VALUE, one per line)"
+    required: false
+    default: ""
+  min-instances:
+    description: "Minimum number of instances"
+    required: false
+    default: "0"
+  max-instances:
+    description: "Maximum number of instances"
+    required: false
+    default: "100"
+  cpu:
+    description: "CPU allocation (e.g., 1, 2, 4)"
+    required: false
+    default: "1"
+  memory:
+    description: "Memory allocation (e.g., 256Mi, 512Mi, 1Gi)"
+    required: false
+    default: "256Mi"
+  vpc-connector:
+    description: "Full VPC connector resource path (e.g., projects/PROJECT/locations/REGION/connectors/NAME)"
+    required: false
+    default: ""
+  port:
+    description: "Container port"
+    required: false
+    default: "8080"
+  timeout:
+    description: "Request timeout in seconds"
+    required: false
+    default: "300"
+  concurrency:
+    description: "Maximum concurrent requests per instance"
+    required: false
+    default: "80"
+  flags:
+    description: "Additional gcloud run deploy flags (multiline)"
+    required: false
+    default: ""
+
+outputs:
+  url:
+    description: "Deployed service URL"
+    value: ${{ steps.deploy.outputs.url }}
+  revision:
+    description: "Deployed revision name"
+    value: ${{ steps.deploy.outputs.revision }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Format environment variables
+      id: format-env
+      shell: bash
+      env:
+        ENV_VARS_INPUT: ${{ inputs.env-vars }}
+      run: |
+        if [[ -n "$ENV_VARS_INPUT" ]]; then
+          # Convert multiline KEY=VALUE to comma-separated format
+          # Remove empty lines, comment lines, and trailing whitespace
+          FORMATTED=$(echo "$ENV_VARS_INPUT" \
+            | grep -v '^[[:space:]]*$' \
+            | grep -v '^[[:space:]]*#' \
+            | sed 's/[[:space:]]*$//' \
+            | paste -sd ',' -)
+
+          echo "env-vars=${FORMATTED}" >> $GITHUB_OUTPUT
+
+          # Log variable names (not values) for debugging
+          echo "Environment variables configured:"
+          echo "$ENV_VARS_INPUT" \
+            | grep -v '^[[:space:]]*$' \
+            | grep -v '^[[:space:]]*#' \
+            | cut -d'=' -f1 \
+            | while read -r key; do echo "  - $key"; done
+        fi
+
+    - name: Build deployment flags
+      id: build-flags
+      shell: bash
+      env:
+        MIN_INSTANCES: ${{ inputs.min-instances }}
+        MAX_INSTANCES: ${{ inputs.max-instances }}
+        CPU: ${{ inputs.cpu }}
+        MEMORY: ${{ inputs.memory }}
+        VPC_CONNECTOR: ${{ inputs.vpc-connector }}
+        PORT: ${{ inputs.port }}
+        TIMEOUT: ${{ inputs.timeout }}
+        CONCURRENCY: ${{ inputs.concurrency }}
+        EXTRA_FLAGS: ${{ inputs.flags }}
+      run: |
+        FLAGS="--min-instances=${MIN_INSTANCES}"
+        FLAGS="${FLAGS} --max-instances=${MAX_INSTANCES}"
+        FLAGS="${FLAGS} --cpu=${CPU}"
+        FLAGS="${FLAGS} --memory=${MEMORY}"
+        FLAGS="${FLAGS} --port=${PORT}"
+        FLAGS="${FLAGS} --timeout=${TIMEOUT}"
+        FLAGS="${FLAGS} --concurrency=${CONCURRENCY}"
+
+        if [[ -n "$VPC_CONNECTOR" ]]; then
+          FLAGS="${FLAGS} --vpc-connector=${VPC_CONNECTOR}"
+        fi
+
+        if [[ -n "$EXTRA_FLAGS" ]]; then
+          EXTRA=$(echo "$EXTRA_FLAGS" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          FLAGS="${FLAGS} ${EXTRA}"
+        fi
+
+        echo "flags=${FLAGS}" >> $GITHUB_OUTPUT
+
+    - name: Deploy to Cloud Run
+      id: deploy
+      uses: google-github-actions/deploy-cloudrun@v3
+      with:
+        image: ${{ inputs.image }}
+        service: ${{ inputs.service }}
+        region: ${{ inputs.region }}
+        project_id: ${{ inputs.project-id }}
+        env_vars: ${{ steps.format-env.outputs.env-vars }}
+        flags: ${{ steps.build-flags.outputs.flags }}
+
+    - name: Output summary
+      shell: bash
+      run: |
+        echo "## Cloud Run Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Service** | \`${{ inputs.service }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Region** | ${{ inputs.region }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **URL** | ${{ steps.deploy.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Instances** | ${{ inputs.min-instances }} - ${{ inputs.max-instances }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Resources** | ${{ inputs.cpu }} CPU / ${{ inputs.memory }} |" >> $GITHUB_STEP_SUMMARY

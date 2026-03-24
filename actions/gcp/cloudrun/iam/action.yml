@@ -1,0 +1,44 @@
+name: "Cloud Run IAM"
+description: "Manage IAM policy for Cloud Run services (public or private access)"
+author: "OGTIC"
+
+inputs:
+  service:
+    description: "Cloud Run service name"
+    required: true
+  region:
+    description: "GCP region"
+    required: true
+  project-id:
+    description: "GCP project ID"
+    required: false
+    default: ""
+  allow-unauthenticated:
+    description: "Allow public unauthenticated access"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Allow unauthenticated access
+      if: inputs.allow-unauthenticated == 'true'
+      shell: bash
+      run: |
+        gcloud run services add-iam-policy-binding ${{ inputs.service }} \
+          --region=${{ inputs.region }} \
+          ${{ inputs.project-id != '' && format('--project={0}', inputs.project-id) || '' }} \
+          --member=allUsers \
+          --role=roles/run.invoker \
+          --quiet
+
+    - name: Remove unauthenticated access
+      if: inputs.allow-unauthenticated == 'false'
+      shell: bash
+      run: |
+        gcloud run services remove-iam-policy-binding ${{ inputs.service }} \
+          --region=${{ inputs.region }} \
+          ${{ inputs.project-id != '' && format('--project={0}', inputs.project-id) || '' }} \
+          --member=allUsers \
+          --role=roles/run.invoker \
+          --quiet 2>/dev/null || true

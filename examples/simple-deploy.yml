@@ -1,0 +1,47 @@
+# Example: Minimal build and deploy to Cloud Run
+# Copy this to your repo at .github/workflows/deploy.yml
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & push image
+        id: build
+        uses: ogticrd/actions/actions/docker/build@main
+        with:
+          image-name: ${{ vars.GOOGLE_ARTIFACT_REGISTRY }}/${{ vars.APP_NAME }}
+          registry-username: _json_key
+          registry-password: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Authenticate to GCP
+        uses: ogticrd/actions/actions/gcp/auth@main
+        with:
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          credentials-json: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: ogticrd/actions/actions/gcp/cloudrun/deploy@main
+        with:
+          image: ${{ steps.build.outputs.primary-image }}
+          service: ${{ vars.APP_NAME }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+
+      - name: Allow public access
+        uses: ogticrd/actions/actions/gcp/cloudrun/iam@main
+        with:
+          service: ${{ vars.APP_NAME }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}

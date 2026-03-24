@@ -1,0 +1,40 @@
+name: "Cloud Run Cleanup"
+description: "Delete Cloud Run services (useful for PR environment cleanup)"
+author: "OGTIC"
+
+inputs:
+  service:
+    description: "Cloud Run service name to delete"
+    required: true
+  region:
+    description: "GCP region"
+    required: true
+  project-id:
+    description: "GCP project ID"
+    required: false
+    default: ""
+
+outputs:
+  deleted:
+    description: "Whether the service was deleted"
+    value: ${{ steps.cleanup.outputs.deleted }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Delete Cloud Run service
+      id: cleanup
+      shell: bash
+      env:
+        SERVICE: ${{ inputs.service }}
+        REGION: ${{ inputs.region }}
+        PROJECT_FLAG: ${{ inputs.project-id != '' && format('--project={0}', inputs.project-id) || '' }}
+      run: |
+        if gcloud run services describe "$SERVICE" --region="$REGION" $PROJECT_FLAG > /dev/null 2>&1; then
+          echo "Deleting service: $SERVICE"
+          gcloud run services delete "$SERVICE" --region="$REGION" $PROJECT_FLAG --quiet
+          echo "deleted=true" >> $GITHUB_OUTPUT
+        else
+          echo "Service '$SERVICE' not found, skipping deletion"
+          echo "deleted=false" >> $GITHUB_OUTPUT
+        fi

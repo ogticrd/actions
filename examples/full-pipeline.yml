@@ -1,0 +1,81 @@
+# Example: Full pipeline with build args, env vars, and custom scaling
+# Copy this to your repo at .github/workflows/deploy.yml
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image: ${{ steps.build.outputs.primary-image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & push image
+        id: build
+        uses: ogticrd/actions/actions/docker/build@main
+        with:
+          image-name: ${{ vars.GOOGLE_ARTIFACT_REGISTRY }}/${{ vars.APP_NAME }}
+          registry-username: _json_key
+          registry-password: ${{ secrets.GAR_JSON_KEY }}
+          target: runner
+          environment: staging
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Authenticate to GCP
+        uses: ogticrd/actions/actions/gcp/auth@main
+        with:
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          credentials-json: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: ogticrd/actions/actions/gcp/cloudrun/deploy@main
+        with:
+          image: ${{ needs.build.outputs.image }}
+          service: ${{ vars.APP_NAME }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          env-vars: |
+            NODE_ENV=production
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            API_KEY=${{ secrets.API_KEY }}
+            SENTRY_DSN=${{ vars.SENTRY_DSN }}
+          min-instances: "0"
+          max-instances: "10"
+          cpu: "1"
+          memory: 512Mi
+          vpc-connector: projects/${{ vars.GOOGLE_PROJECT_ID }}/locations/${{ vars.GOOGLE_CLOUD_REGION }}/connectors/${{ vars.GOOGLE_CLOUD_REGION }}
+
+      - name: Allow public access
+        uses: ogticrd/actions/actions/gcp/cloudrun/iam@main
+        with:
+          service: ${{ vars.APP_NAME }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+
+      - name: Health check
+        run: curl "${{ steps.deploy.outputs.url }}"

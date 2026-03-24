@@ -1,0 +1,185 @@
+# Example: Multi-environment pipeline (dev, staging, production)
+# Each job sets its own `environment:` for scoped secrets.
+# Copy this to your repo at .github/workflows/deploy.yml
+
+name: Multi-Environment Deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build (shared) ─────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image: ${{ steps.build.outputs.primary-image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & push image
+        id: build
+        uses: ogticrd/actions/actions/docker/build@main
+        with:
+          image-name: ${{ vars.GOOGLE_ARTIFACT_REGISTRY }}/${{ vars.APP_NAME }}
+          registry-username: _json_key
+          registry-password: ${{ secrets.GAR_JSON_KEY }}
+          target: runner
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+
+  # ── Dev (on PR) ────────────────────────────────
+  deploy-dev:
+    if: github.event_name == 'pull_request'
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: development
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Authenticate to GCP
+        uses: ogticrd/actions/actions/gcp/auth@main
+        with:
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          credentials-json: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: ogticrd/actions/actions/gcp/cloudrun/deploy@main
+        with:
+          image: ${{ needs.build.outputs.image }}
+          service: ${{ vars.APP_NAME }}-pr-${{ github.event.pull_request.number }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          env-vars: |
+            NODE_ENV=development
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            API_KEY=${{ secrets.API_KEY }}
+          min-instances: "0"
+          max-instances: "5"
+          cpu: "1"
+          memory: 256Mi
+
+      - name: Allow public access
+        uses: ogticrd/actions/actions/gcp/cloudrun/iam@main
+        with:
+          service: ${{ vars.APP_NAME }}-pr-${{ github.event.pull_request.number }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+
+  # ── Staging (on push to main) ──────────────────
+  deploy-staging:
+    if: github.event_name == 'push'
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Authenticate to GCP
+        uses: ogticrd/actions/actions/gcp/auth@main
+        with:
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          credentials-json: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: ogticrd/actions/actions/gcp/cloudrun/deploy@main
+        with:
+          image: ${{ needs.build.outputs.image }}
+          service: ${{ vars.APP_NAME }}-staging
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          env-vars: |
+            NODE_ENV=production
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            API_KEY=${{ secrets.API_KEY }}
+          min-instances: "0"
+          max-instances: "10"
+          cpu: "1"
+          memory: 512Mi
+
+      - name: Allow public access
+        uses: ogticrd/actions/actions/gcp/cloudrun/iam@main
+        with:
+          service: ${{ vars.APP_NAME }}-staging
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+
+  # ── Production (on release) ────────────────────
+  deploy-production:
+    if: github.event_name == 'release'
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Authenticate to GCP
+        uses: ogticrd/actions/actions/gcp/auth@main
+        with:
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          credentials-json: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: ogticrd/actions/actions/gcp/cloudrun/deploy@main
+        with:
+          image: ${{ needs.build.outputs.image }}
+          service: ${{ vars.APP_NAME }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          env-vars: |
+            NODE_ENV=production
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            API_KEY=${{ secrets.API_KEY }}
+          min-instances: "1"
+          max-instances: "300"
+          cpu: "2"
+          memory: 1Gi
+          vpc-connector: projects/${{ vars.GOOGLE_PROJECT_ID }}/locations/${{ vars.GOOGLE_CLOUD_REGION }}/connectors/${{ vars.GOOGLE_CLOUD_REGION }}
+
+      - name: Allow public access
+        uses: ogticrd/actions/actions/gcp/cloudrun/iam@main
+        with:
+          service: ${{ vars.APP_NAME }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
+
+  # ── Cleanup dev on PR close ────────────────────
+  cleanup:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to GCP
+        uses: ogticrd/actions/actions/gcp/auth@main
+        with:
+          project-id: ${{ vars.GOOGLE_PROJECT_ID }}
+          credentials-json: ${{ secrets.GAR_JSON_KEY }}
+
+      - name: Delete dev service
+        uses: ogticrd/actions/actions/gcp/cloudrun/cleanup@main
+        with:
+          service: ${{ vars.APP_NAME }}-pr-${{ github.event.pull_request.number }}
+          region: ${{ vars.GOOGLE_CLOUD_REGION }}
